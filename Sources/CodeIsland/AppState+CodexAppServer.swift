@@ -411,6 +411,9 @@ extension AppState {
     private func applyCodexThreadStartedNotification(params: [String: AnyCodableLike]) {
         guard let thread = params["thread"]?.asObject else { return }
         guard let threadId = thread["id"]?.asString else { return }
+        let transcriptPath = thread["path"]?.asString
+            ?? Self.codexTranscriptPath(sessionId: threadId, cwd: nil, processStart: nil)
+        if CodexTranscriptIdentity.isGuardian(path: transcriptPath) { return }
         let sessionId = AppState.codexAppSessionPrefix + threadId
         closedCodexAppThreads.removeValue(forKey: threadId)
 

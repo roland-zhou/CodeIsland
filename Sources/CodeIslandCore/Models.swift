@@ -215,9 +215,16 @@ public struct HookEvent {
     public let rawJSON: [String: Any]  // Full payload for event-specific fields
 
     public init?(from data: Data) {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let eventName = HookEvent.firstString(in: json, keys: ["hook_event_name", "hookEventName", "event_name", "eventName"]) else {
             return nil
+        }
+        // Desktop hook processes do not always inherit a terminal bundle id.
+        // Local rollout provenance must win over that missing process ancestry.
+        if (json["_source"] as? String)?.lowercased() == "codex",
+           json["_remote_host_id"] == nil,
+           CodexTranscriptIdentity.isDesktop(path: json["transcript_path"] as? String) {
+            json["_term_bundle"] = "com.openai.codex"
         }
         self.eventName = eventName
         let rawSessionId = HookEvent.firstString(in: json, keys: ["session_id", "sessionId"])

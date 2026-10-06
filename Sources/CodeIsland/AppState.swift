@@ -1603,6 +1603,11 @@ final class AppState {
     }
 
     func handleEvent(_ event: HookEvent) {
+        if (event.rawJSON["_source"] as? String)?.lowercased() == "codex",
+           event.rawJSON["_remote_host_id"] == nil,
+           CodexTranscriptIdentity.isGuardian(path: event.rawJSON["transcript_path"] as? String) {
+            return
+        }
         // Skip events from subagent worktrees — tracked via parent's SubagentStart/Stop
         if let cwd = event.rawJSON["cwd"] as? String,
            cwd.contains("/.claude/worktrees/agent-") || cwd.contains("/.git/worktrees/agent-") {
@@ -3181,7 +3186,7 @@ final class AppState {
         }
     }
 
-    private nonisolated static func codexTranscriptPath(
+    nonisolated static func codexTranscriptPath(
         sessionId: String,
         cwd: String?,
         processStart: Date?
@@ -3326,11 +3331,14 @@ final class AppState {
         let cutoff = Date().addingTimeInterval(-30 * 60) // 30 minutes
         for p in persisted where p.lastActivity > cutoff {
             guard let source = SessionSnapshot.normalizedSupportedSource(p.source) else { continue }
+            if source == "codex", !p.sessionId.hasPrefix("remote:"), CodexTranscriptIdentity.isGuardian(path: p.transcriptPath) { continue }
+            let restoredBundle = source == "codex" && !p.sessionId.hasPrefix("remote:") && CodexTranscriptIdentity.isDesktop(path: p.transcriptPath)
+                ? Self.codexAppBundleId : p.termBundleId
             let restoredSessionId = Self.canonicalRestoredCodexSessionId(
                 sessionId: p.sessionId,
                 source: source,
                 providerSessionId: p.providerSessionId,
-                termBundleId: p.termBundleId
+                termBundleId: restoredBundle
             )
             guard sessions[restoredSessionId] == nil else { continue }
             var snapshot = SessionSnapshot(startTime: p.startTime)
@@ -3355,7 +3363,7 @@ final class AppState {
             snapshot.tmuxPane = p.tmuxPane
             snapshot.tmuxClientTty = p.tmuxClientTty
             snapshot.tmuxEnv = p.tmuxEnv
-            snapshot.termBundleId = p.termBundleId
+            snapshot.termBundleId = restoredBundle
             snapshot.cmuxSurfaceId = p.cmuxSurfaceId
             snapshot.cmuxWorkspaceId = p.cmuxWorkspaceId
             snapshot.zellijPaneId = p.zellijPaneId
@@ -3732,6 +3740,7 @@ final class AppState {
     func integrateDiscovered(_ discovered: [DiscoveredSession]) {
         var didMutate = false
         for info in discovered {
+            if info.source == "codex", CodexTranscriptIdentity.isGuardian(path: info.transcriptPath) { continue }
             if shouldSuppressClosedCodexDesktopDiscovery(info) {
                 continue
             }
@@ -7086,6 +7095,7 @@ final class AppState {
                 // JSON `source` rows can also belong to a concurrent Codex CLI
                 // subagent. Never re-key an explicitly CLI-origin rollout into
                 // the Desktop namespace merely because the Desktop host is open.
+                if CodexTranscriptIdentity.isGuardian(path: transcriptPath) { continue }
                 let transcriptOrigin = codexTranscriptOrigin(path: transcriptPath)
                 let databaseSource = sqliteColumnString(statement, index: 6) ?? ""
                 if databaseSource.hasPrefix("{\"subagent") {
@@ -7224,6 +7234,7 @@ final class AppState {
             }
 
             for file in files {
+                if CodexTranscriptIdentity.isGuardian(path: file) { continue }
                 let fileName = (file as NSString).lastPathComponent
                 let rawSessionId = extractCodexSessionId(from: fileName)
                 guard !rawSessionId.isEmpty else { continue }
@@ -7365,7 +7376,8 @@ final class AppState {
               !subagent.isEmpty else {
             return .root
         }
-        let parent = firstStringRecursively(in: subagent, key: "parent_thread_id")
+        let parent = payload["parent_thread_id"] as? String
+            ?? firstStringRecursively(in: subagent, key: "parent_thread_id")
         guard let parent, !parent.isEmpty else { return .unavailable }
 
         let agentType = firstStringRecursively(in: subagent, key: "agent_role")

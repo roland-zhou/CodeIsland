@@ -431,6 +431,14 @@ final class AppStateCodexSubsessionTests: XCTestCase {
         XCTAssertEqual(metadata.agentNickname, "Galileo")
     }
 
+    func testTopLevelCodexSubagentParentIsRecognized() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let line = #"{"type":"session_meta","payload":{"parent_thread_id":"parent","source":{"subagent":{"other":"guardian"}},"thread_source":"guardian_review"}}"#
+        try (line + "\n").write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(AppState.codexSubagentMetadata(inTranscriptPath: file.path)?.parentThreadId, "parent")
+    }
+
     func testCodexSubagentMetadataFallsBackToThreadSpawnEdgesDatabase() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("codeisland-codex-subagent-db-\(UUID().uuidString)")
